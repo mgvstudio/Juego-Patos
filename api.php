@@ -21,12 +21,16 @@ function responder(array $datos, int $codigo = 200): void
 try {
     $accion = $_GET['accion'] ?? 'ranking';
 
+    // Cada modo de juego tiene su propio ranking (lista blanca de tablas)
+    $modo  = $_GET['modo'] ?? '';
+    $tabla = $modo === 'mr' ? 'puntajes_mr' : 'puntajes';
+
     if ($accion === 'ranking') {
         $limite = (int)($_GET['limite'] ?? 10);
         $limite = max(1, min(50, $limite));
 
         $sql = "SELECT nombre, milisegundos, creado_en
-                FROM puntajes
+                FROM $tabla
                 ORDER BY milisegundos ASC, creado_en ASC
                 LIMIT $limite";
         $filas = db()->query($sql)->fetchAll();
@@ -64,7 +68,7 @@ try {
         $patos = max(1, min(255, $patos));
 
         $stmt = db()->prepare(
-            'INSERT INTO puntajes (nombre, milisegundos, patos) VALUES (?, ?, ?)'
+            "INSERT INTO $tabla (nombre, milisegundos, patos) VALUES (?, ?, ?)"
         );
         $stmt->execute([$nombre, $ms, $patos]);
 
@@ -72,7 +76,7 @@ try {
 
         // Posicion dentro del ranking global.
         $pos = db()->prepare(
-            'SELECT COUNT(*) + 1 FROM puntajes WHERE milisegundos < ?'
+            "SELECT COUNT(*) + 1 FROM $tabla WHERE milisegundos < ?"
         );
         $pos->execute([$ms]);
 

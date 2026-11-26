@@ -2,7 +2,7 @@
 /**
  * Encuentra los patos - juego para tableta / pantalla completa.
  */
-$version = '2.6.0';
+$version = '2.7.0';
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -83,6 +83,10 @@ $version = '2.6.0';
       <p class="ayuda">No se ve toda la escena a la vez: <strong>arrastra para recorrerla</strong>
          y acerca con dos dedos (pellizco) para mirar de cerca.</p>
       <button type="button" class="btn btn-grande" id="btn-jugar">Jugar</button>
+      <!-- Solo se muestra en visores con realidad mixta (Meta Quest 3) -->
+      <p id="caja-mr" style="display:none;margin:16px 0 0">
+        <a class="btn btn-sec" href="realidad-mixta.php">Jugar en realidad mixta (Meta Quest)</a>
+      </p>
     </div>
   </div>
 

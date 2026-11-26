@@ -46,18 +46,22 @@ function db(): PDO
         $pdo = new PDO($dsn, $cfg['user'], $cfg['pass'], $opciones);
     }
 
-    // La tabla si la puede crear el usuario de Plesk dentro de su propia base.
-    $pdo->exec(
-        "CREATE TABLE IF NOT EXISTS puntajes (
-            id           INT UNSIGNED NOT NULL AUTO_INCREMENT,
-            nombre       VARCHAR(40)  NOT NULL,
-            milisegundos INT UNSIGNED NOT NULL,
-            patos        TINYINT UNSIGNED NOT NULL DEFAULT 5,
-            creado_en    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (id),
-            KEY idx_tiempo (milisegundos)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
-    );
+    // Las tablas si las puede crear el usuario de Plesk dentro de su propia base.
+    // puntajes    -> version de tableta
+    // puntajes_mr -> version de realidad mixta (Meta Quest), ranking aparte
+    foreach (['puntajes', 'puntajes_mr'] as $tabla) {
+        $pdo->exec(
+            "CREATE TABLE IF NOT EXISTS $tabla (
+                id           INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                nombre       VARCHAR(40)  NOT NULL,
+                milisegundos INT UNSIGNED NOT NULL,
+                patos        TINYINT UNSIGNED NOT NULL DEFAULT 5,
+                creado_en    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (id),
+                KEY idx_tiempo (milisegundos)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        );
+    }
 
     return $pdo;
 }

@@ -752,6 +752,17 @@ function inicializar() {
 
   aplicarVista();
   cerrarSplash();
+  detectarRealidadMixta();
+}
+
+/**
+ * En un visor como el Meta Quest 3 ofrece la version de realidad mixta.
+ */
+function detectarRealidadMixta() {
+  if (!navigator.xr || !navigator.xr.isSessionSupported) return;
+  navigator.xr.isSessionSupported('immersive-ar').then((ok) => {
+    if (ok) $('#caja-mr').style.display = 'block';
+  }).catch(() => {});
 }
 
 /**

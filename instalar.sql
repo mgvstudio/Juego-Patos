@@ -12,3 +12,6 @@ CREATE TABLE IF NOT EXISTS puntajes (
     PRIMARY KEY (id),
     KEY idx_tiempo (milisegundos)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Ranking de la version de realidad mixta (Meta Quest 3)
+CREATE TABLE IF NOT EXISTS puntajes_mr LIKE puntajes;
