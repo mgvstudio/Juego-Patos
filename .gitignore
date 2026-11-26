@@ -1,0 +1,9 @@
+# Configuracion con contrasenas: cada entorno tiene la suya (ver config.example.php)
+config.php
+
+# Archivos pesados que no van en el repositorio
+MongoDB-selected-assets/
+*.zip
+
+# Sonido opcional grabado (si lo agregas y quieres versionarlo, quita esta linea)
+# sonidos/
