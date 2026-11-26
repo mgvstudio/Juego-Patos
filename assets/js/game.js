@@ -75,8 +75,25 @@ const CONFIG = {
   margenToque: 10,
   // Pixeles de arrastre permitidos antes de considerar que fue un movimiento
   // (y no un toque para atrapar un pato)
-  umbralToque: 12
+  umbralToque: 12,
+
+  // ---- Reglas ----
+  // Cuenta regresiva en milisegundos (90000 = 1:30). 0 = sin limite.
+  tiempoLimite: 90000,
+  // Segundos que se muestran los patos faltantes al acabarse el tiempo
+  segundosRevelado: 4,
+  // El reloj cambia a ambar / rojo (latiendo) con estos segundos restantes
+  avisoAmbar: 20,
+  avisoRojo: 10,
+
+  // ---- Efectos ----
+  sonidoPato: true,     // "cuac" al atrapar (sonidos/cuac.mp3 o sintetizado)
+  volumenPato: 1,
+  vibracion: true       // vibra el dispositivo al atrapar (si lo soporta)
 };
+
+// Guarda el nombre del jugador entre partidas
+const CLAVE_NOMBRE = 'patos.nombre';
 
 /* ===== Referencias del DOM ===== */
 const $ = (sel) => document.querySelector(sel);
@@ -99,8 +116,13 @@ const estado = {
   inicio: 0,
   transcurrido: 0,
   rafCrono: null,
-  ultimoTiempo: 0
+  ultimoTiempo: 0,
+  nombre: ''
 };
+
+// "tableta" en pantallas tactiles; "pantalla" con raton
+const MODO_JUEGO = window.matchMedia && window.matchMedia('(pointer: coarse)').matches
+  ? 'tableta' : 'pantalla';
 
 /* =============================================================
    Utilidades
@@ -137,6 +159,21 @@ function aplicarVista() {
   lienzo.style.transform =
     'translate(' + vista.x + 'px,' + vista.y + 'px) scale(' + vista.escala + ')';
   lienzo.classList.toggle('con-zoom', vista.escala > 1.001);
+  informarVista();
+}
+
+// Zona del fondo que esta mirando el jugador (fracciones 0..1) para el panel en vivo
+function informarVista() {
+  if (!window.EnVivo || !estado.jugando) return;
+  const ancho = lienzo.offsetWidth * vista.escala;
+  const alto  = lienzo.offsetHeight * vista.escala;
+  if (!ancho || !alto) return;
+  const dispAncho = Math.min(escenario.clientWidth, ancho);
+  const dispAlto  = Math.min(escenario.clientHeight, alto);
+  const f = (v) => limitar(v, 0, 1).toFixed(3);
+  EnVivo.actualizar({
+    vista: [f(-vista.x / ancho), f(-vista.y / alto), f(dispAncho / ancho), f(dispAlto / alto)].join(',')
+  });
 }
 
 // Convierte coordenadas de pantalla a coordenadas locales del lienzo sin transformar
@@ -429,6 +466,13 @@ function atraparPato(pato) {
 
   setTimeout(() => pato.remove(), 500);
 
+  if (CONFIG.sonidoPato && window.SonidoPato) {
+    SonidoPato.volumen = CONFIG.volumenPato;
+    SonidoPato.cuac({ veces: 2 });
+  }
+  if (CONFIG.vibracion && navigator.vibrate) navigator.vibrate(60);
+  if (window.EnVivo) EnVivo.actualizar({ encontrados: estado.encontrados });
+
   if (estado.encontrados >= CONFIG.totalPatos) terminarPartida();
 }
 
@@ -437,8 +481,22 @@ function atraparPato(pato) {
    ============================================================= */
 function tick() {
   estado.transcurrido = performance.now() - estado.inicio;
-  elCrono.textContent = formatearTiempo(estado.transcurrido);
+
+  if (CONFIG.tiempoLimite > 0) {
+    const restante = CONFIG.tiempoLimite - estado.transcurrido;
+    elCrono.textContent = formatearTiempo(restante);
+    elCrono.classList.toggle('ambar', restante <= CONFIG.avisoAmbar * 1000 && restante > CONFIG.avisoRojo * 1000);
+    elCrono.classList.toggle('rojo', restante <= CONFIG.avisoRojo * 1000);
+    if (restante <= 0) { tiempoAgotado(); return; }
+  } else {
+    elCrono.textContent = formatearTiempo(estado.transcurrido);
+  }
+
   estado.rafCrono = requestAnimationFrame(tick);
+}
+
+function textoReloj() {
+  return formatearTiempo(CONFIG.tiempoLimite > 0 ? CONFIG.tiempoLimite : 0);
 }
 
 function iniciarCrono() {
@@ -462,7 +520,9 @@ function nuevaPartida() {
   estado.transcurrido = 0;
 
   elEncontrados.textContent = '0';
-  elCrono.textContent = '00:00.0';
+  elCrono.textContent = textoReloj();
+  elCrono.classList.remove('ambar', 'rojo');
+  escenario.classList.remove('agotado');
 
   ajustarLienzo();
   pintarPatos();       // posiciones nuevas en cada partida
@@ -476,21 +536,58 @@ function nuevaPartida() {
   const aviso = $('#aviso-guardado');
   aviso.textContent = '';
   aviso.className = 'aviso';
-  $('#btn-guardar').disabled = false;
+
+  if (window.EnVivo) {
+    EnVivo.iniciar({ nombre: estado.nombre, modo: MODO_JUEGO, total: CONFIG.totalPatos });
+    informarVista();
+  }
 }
 
+/** Gano: encontro todos los patos */
 function terminarPartida() {
   estado.jugando = false;
   detenerCrono();
   estado.ultimoTiempo = Math.round(estado.transcurrido);
+  elCrono.classList.remove('ambar', 'rojo');
 
+  if (window.EnVivo) EnVivo.cerrar('ganado', { encontrados: estado.encontrados });
+  if (CONFIG.sonidoPato && window.SonidoPato) setTimeout(() => SonidoPato.victoria(), 350);
   lluviaConfeti();
 
+  // Solo las partidas completas entran al ranking; se guarda solo
+  guardarAutomatico();
+
   setTimeout(() => {
+    $('#titulo-fin').textContent = '¡Los encontraste todos! 🎉';
     $('#tiempo-final').textContent = formatearTiempo(estado.ultimoTiempo);
+    $('#tiempo-final').style.display = '';
+    $('#resumen-fin').textContent = CONFIG.totalPatos + ' / ' + CONFIG.totalPatos + ' patos encontrados';
     abrirModal('#modal-fin');
-    $('#nombre').focus();
   }, 700);
+}
+
+/** Perdio: se acabo la cuenta regresiva */
+function tiempoAgotado() {
+  estado.jugando = false;
+  detenerCrono();
+  elCrono.textContent = formatearTiempo(0);
+
+  if (window.EnVivo) EnVivo.cerrar('perdido', { encontrados: estado.encontrados });
+  if (CONFIG.sonidoPato && window.SonidoPato) SonidoPato.aviso();
+
+  // El fondo se tine de verde y los patos que faltaban se muestran sin camuflaje
+  escenario.classList.add('agotado');
+  capaPatos.querySelectorAll('.pato:not(.encontrado)').forEach((p) => p.classList.add('revelado'));
+
+  setTimeout(() => {
+    $('#titulo-fin').textContent = '¡Se acabó el tiempo! ⏰';
+    $('#tiempo-final').style.display = 'none';
+    $('#resumen-fin').textContent = estado.encontrados + ' / ' + CONFIG.totalPatos + ' patos encontrados';
+    const aviso = $('#aviso-guardado');
+    aviso.textContent = 'Solo las partidas completas entran al ranking.';
+    aviso.className = 'aviso';
+    abrirModal('#modal-fin');
+  }, CONFIG.segundosRevelado * 1000);
 }
 
 /* =============================================================
@@ -622,21 +719,9 @@ async function cargarRanking(destacarNombre, destacarMs) {
   }
 }
 
-async function guardarTiempo(ev) {
-  ev.preventDefault();
-
-  const nombre = $('#nombre').value.trim();
-  const aviso  = $('#aviso-guardado');
-  const boton  = $('#btn-guardar');
-
-  if (!nombre) {
-    aviso.textContent = 'Escribe tu nombre.';
-    aviso.className = 'aviso err';
-    return;
-  }
-
-  boton.disabled = true;
-  aviso.textContent = 'Guardando...';
+async function guardarAutomatico() {
+  const aviso = $('#aviso-guardado');
+  aviso.textContent = 'Guardando tiempo de ' + estado.nombre + '...';
   aviso.className = 'aviso';
 
   try {
@@ -644,27 +729,19 @@ async function guardarTiempo(ev) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        nombre: nombre,
+        nombre: estado.nombre,
         milisegundos: estado.ultimoTiempo,
         patos: CONFIG.totalPatos
       })
     });
     const datos = await res.json();
-
     if (!datos.ok) throw new Error(datos.error || 'No se pudo guardar');
 
-    aviso.textContent = 'Guardado. Posicion #' + datos.posicion + ' del ranking.';
+    aviso.textContent = 'Guardado. Posición #' + datos.posicion + ' del ranking.';
     aviso.className = 'aviso ok';
-
-    setTimeout(() => {
-      cerrarModal('#modal-fin');
-      abrirModal('#modal-ranking');
-      cargarRanking(nombre, estado.ultimoTiempo);
-    }, 900);
   } catch (e) {
-    aviso.textContent = 'Error: ' + e.message;
+    aviso.textContent = 'No se pudo guardar el tiempo.';
     aviso.className = 'aviso err';
-    boton.disabled = false;
   }
 }
 
@@ -693,11 +770,36 @@ function inicializar() {
 
   ajustarLienzoConfeti();
 
+  // Nombre recordado de la partida anterior
+  try { $('#nombre').value = localStorage.getItem(CLAVE_NOMBRE) || ''; } catch (e) {}
+  $('#txt-limite').textContent = CONFIG.tiempoLimite > 0
+    ? Math.floor(CONFIG.tiempoLimite / 60000) + ':' +
+      String(Math.round(CONFIG.tiempoLimite / 1000) % 60).padStart(2, '0') + ' minutos'
+    : 'todo el tiempo que quieras';
+  elCrono.textContent = textoReloj();
+
   $('#btn-jugar').addEventListener('click', () => {
+    const nombre = $('#nombre').value.trim().replace(/\s+/g, ' ');
+    if (!nombre) {
+      $('#aviso-inicio').textContent = 'Escribe tu nombre para jugar.';
+      $('#aviso-inicio').className = 'aviso err';
+      $('#nombre').focus();
+      return;
+    }
+    estado.nombre = nombre.slice(0, 40);
+    try { localStorage.setItem(CLAVE_NOMBRE, estado.nombre); } catch (e) {}
+    $('#aviso-inicio').textContent = '';
+    if (window.SonidoPato) SonidoPato.contexto();   // el audio se habilita con este toque
     alternarPantallaCompleta();
     nuevaPartida();
   });
-  $('#btn-reiniciar').addEventListener('click', nuevaPartida);
+  $('#nombre').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') $('#btn-jugar').click();
+  });
+  // Reiniciar sin nombre lleva a la portada
+  $('#btn-reiniciar').addEventListener('click', () => {
+    if (estado.nombre) nuevaPartida(); else abrirModal('#modal-inicio');
+  });
   $('#btn-otra').addEventListener('click', nuevaPartida);
   $('#btn-pantalla').addEventListener('click', alternarPantallaCompleta);
 
@@ -707,7 +809,11 @@ function inicializar() {
   });
   $('#btn-cerrar-ranking').addEventListener('click', () => cerrarModal('#modal-ranking'));
 
-  $('#form-nombre').addEventListener('submit', guardarTiempo);
+  $('#btn-ver-ranking').addEventListener('click', () => {
+    cerrarModal('#modal-fin');
+    abrirModal('#modal-ranking');
+    cargarRanking(estado.nombre, estado.ultimoTiempo);
+  });
 
   // Evitar el menu contextual y el zoom nativo del navegador en tableta
   document.addEventListener('contextmenu', (e) => e.preventDefault());

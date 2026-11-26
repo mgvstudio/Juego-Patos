@@ -8,12 +8,20 @@
    - Se atrapan TOCANDOLOS con la mano (hand tracking) o con el
      control. Tambien se puede apuntar y pulsar gatillo / pellizco.
    - Al tocarlos suena "cuac" en audio 3D (sale desde el pato).
+   - Mismas reglas que la tableta: 5 patos, 1:30 de cuenta
+     regresiva, revelado al acabarse el tiempo, ranking compartido.
    ============================================================= */
-import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+import * as THREE from './vendor/three.module.js';
 
 const CONFIG = {
-  totalPatos: 8,
+  totalPatos: 5,
   imagenPato: 'pato.png',
+
+  // ---- Reglas (iguales a la tableta para que el ranking sea comparable) ----
+  tiempoLimite: 90000,       // ms; 0 = sin cuenta regresiva
+  segundosRevelado: 4,       // patos faltantes visibles al acabarse el tiempo
+  avisoAmbar: 20,            // segundos restantes para reloj ambar
+  avisoRojo: 10,             // segundos restantes para reloj rojo latiendo
 
   // Alto del pato en metros (0.18 = 18 cm)
   tamano: 0.18,
@@ -36,8 +44,7 @@ const CONFIG = {
   // Distancia extra (m) para que el toque se sienta comodo
   margenToque: 0.03,
 
-  // Sonido: si existe este archivo se usa; si no, se sintetiza un "cuac"
-  sonidoArchivo: 'sonidos/cuac.mp3',
+  // Volumen del cuac al atrapar (el archivo/sintesis esta en sonido-pato.js)
   volumenCuac: 1.0,
 
   // Pistas sonoras: un pato al azar hace "cuac" suave cada cierto tiempo
@@ -46,6 +53,7 @@ const CONFIG = {
   volumenPista: 0.35
 };
 
+const CLAVE_NOMBRE = 'patos.nombre';   // misma clave que la tableta
 const COLORES = [0x00ED64, 0x00A35C, 0x00684A, 0xC0FAE6, 0xE3FCF7, 0xFFFFFF];
 const FUENTE = '"Euclid Circular A", "Everett", system-ui, sans-serif';
 const FUENTE_CIFRAS = '"Source Code Pro", ui-monospace, monospace';
@@ -62,43 +70,27 @@ function formatearTiempo(ms) {
 }
 
 /* =============================================================
-   Sonido (Web Audio con audio espacial HRTF)
+   Sonido 3D: usa SonidoPato (sonido-pato.js) y lo coloca en el
+   espacio con un PannerNode HRTF, asi el cuac sale desde el pato.
    ============================================================= */
-class Sonidos {
-  constructor() {
-    this.ctx = null;
-    this.buffer = null;
-  }
+const sonidos = {
+  iniciar() {
+    return window.SonidoPato ? window.SonidoPato.contexto() : null;
+  },
 
-  // Debe llamarse dentro de un gesto del usuario (clic en "Entrar")
-  async iniciar() {
-    if (!this.ctx) {
-      this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-      this.cargarArchivo(CONFIG.sonidoArchivo);
-    }
-    if (this.ctx.state === 'suspended') await this.ctx.resume();
-  }
-
-  async cargarArchivo(url) {
-    try {
-      const res = await fetch(url, { cache: 'force-cache' });
-      if (!res.ok) return;
-      this.buffer = await this.ctx.decodeAudioData(await res.arrayBuffer());
-    } catch (e) {
-      this.buffer = null;   // sin archivo: se usa el cuac sintetizado
-    }
-  }
+  get ctx() { return window.SonidoPato ? window.SonidoPato.ctx : null; },
 
   // Coloca el "oido" del jugador donde esta su cabeza
   actualizarOyente(camara) {
-    if (!this.ctx) return;
-    const l = this.ctx.listener;
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const l = ctx.listener;
     const p = new THREE.Vector3();
     const q = new THREE.Quaternion();
     camara.matrixWorld.decompose(p, q, new THREE.Vector3());
     const adelante = new THREE.Vector3(0, 0, -1).applyQuaternion(q);
     const arriba = new THREE.Vector3(0, 1, 0).applyQuaternion(q);
-    const t = this.ctx.currentTime;
+    const t = ctx.currentTime;
     if (l.positionX) {
       l.positionX.setValueAtTime(p.x, t);
       l.positionY.setValueAtTime(p.y, t);
@@ -113,16 +105,11 @@ class Sonidos {
       l.setPosition(p.x, p.y, p.z);
       l.setOrientation(adelante.x, adelante.y, adelante.z, arriba.x, arriba.y, arriba.z);
     }
-  }
+  },
 
-  /**
-   * Reproduce un cuac que suena desde la posicion "pos" (metros).
-   * veces: 1 = "cuac", 2 = "cuac-cuac"
-   */
-  cuac(pos, volumen = 1, veces = 1) {
-    if (!this.ctx) return;
+  // Nodo que hace sonar lo que se le conecte desde la posicion "pos"
+  enPosicion(pos, duracionS) {
     const ctx = this.ctx;
-
     const panner = new PannerNode(ctx, {
       panningModel: 'HRTF',
       distanceModel: 'inverse',
@@ -130,94 +117,24 @@ class Sonidos {
       rolloffFactor: 1.2,
       positionX: pos.x, positionY: pos.y, positionZ: pos.z
     });
-    const salida = ctx.createGain();
-    salida.gain.value = volumen * CONFIG.volumenCuac;
-    salida.connect(panner).connect(ctx.destination);
+    panner.connect(ctx.destination);
+    setTimeout(() => { try { panner.disconnect(); } catch (e) {} }, (duracionS + 1.5) * 1000);
+    return panner;
+  },
 
-    const tono = aleatorio(0.92, 1.12);   // cada cuac un poco distinto
-    for (let i = 0; i < veces; i++) {
-      const inicio = ctx.currentTime + 0.01 + i * 0.26;
-      const vol = i === 0 ? 1 : 0.75;
-      if (this.buffer) this.reproducirArchivo(salida, inicio, tono, vol);
-      else this.sintetizar(salida, inicio, tono * (i === 0 ? 1 : 0.94), vol);
-    }
+  /** veces: 1 = "cuac", 2 = "cuac-cuac" */
+  cuac(pos, volumen = 1, veces = 1) {
+    if (!this.ctx) return;
+    window.SonidoPato.cuac({
+      destino: this.enPosicion(pos, veces * 0.26),
+      volumen: volumen * CONFIG.volumenCuac,
+      veces
+    });
+  },
 
-    // Liberar los nodos cuando termina
-    setTimeout(() => { try { panner.disconnect(); salida.disconnect(); } catch (e) {} },
-               (veces * 0.26 + 1.2) * 1000);
-  }
-
-  reproducirArchivo(destino, inicio, tono, vol) {
-    const src = this.ctx.createBufferSource();
-    const g = this.ctx.createGain();
-    g.gain.value = vol;
-    src.buffer = this.buffer;
-    src.playbackRate.value = tono;
-    src.connect(g).connect(destino);
-    src.start(inicio);
-  }
-
-  /**
-   * "Cuac" sintetizado: onda diente de sierra con tono que cae,
-   * filtrada en las frecuencias nasales del pato y con un temblor
-   * de amplitud que le da lo rasposo.
-   */
-  sintetizar(destino, t, tono, vol) {
-    const ctx = this.ctx;
-    const dur = 0.24;
-
-    const osc = ctx.createOscillator();
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(560 * tono, t);
-    osc.frequency.exponentialRampToValueAtTime(400 * tono, t + 0.05);
-    osc.frequency.exponentialRampToValueAtTime(300 * tono, t + dur);
-
-    const osc2 = ctx.createOscillator();     // segunda voz desafinada
-    osc2.type = 'square';
-    osc2.frequency.setValueAtTime(565 * tono, t);
-    osc2.frequency.exponentialRampToValueAtTime(404 * tono, t + 0.05);
-    osc2.frequency.exponentialRampToValueAtTime(302 * tono, t + dur);
-    const g2 = ctx.createGain();
-    g2.gain.value = 0.35;
-
-    // Temblor rasposo (modulacion de amplitud ~ 60 Hz)
-    const temblor = ctx.createGain();
-    temblor.gain.value = 0.65;
-    const lfo = ctx.createOscillator();
-    lfo.frequency.value = 58;
-    const lfoAmp = ctx.createGain();
-    lfoAmp.gain.value = 0.35;
-    lfo.connect(lfoAmp).connect(temblor.gain);
-
-    // Formantes nasales
-    const f1 = ctx.createBiquadFilter();
-    f1.type = 'bandpass'; f1.frequency.value = 1150; f1.Q.value = 1.6;
-    const f2 = ctx.createBiquadFilter();
-    f2.type = 'bandpass'; f2.frequency.value = 2500; f2.Q.value = 3.5;
-    const f2g = ctx.createGain(); f2g.gain.value = 0.6;
-    const cuerpo = ctx.createBiquadFilter();
-    cuerpo.type = 'lowpass'; cuerpo.frequency.value = 900;
-    const cuerpoG = ctx.createGain(); cuerpoG.gain.value = 0.25;
-
-    // Envolvente
-    const env = ctx.createGain();
-    env.gain.setValueAtTime(0.0001, t);
-    env.gain.exponentialRampToValueAtTime(vol, t + 0.015);
-    env.gain.setValueAtTime(vol, t + 0.12);
-    env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-
-    osc.connect(temblor);
-    osc2.connect(g2).connect(temblor);
-    temblor.connect(f1).connect(env);
-    temblor.connect(f2).connect(f2g).connect(env);
-    temblor.connect(cuerpo).connect(cuerpoG).connect(env);
-    env.connect(destino);
-
-    [osc, osc2, lfo].forEach((o) => { o.start(t); o.stop(t + dur + 0.05); });
-  }
-}
-
-const sonidos = new Sonidos();
+  victoria() { if (this.ctx) window.SonidoPato.victoria(); },
+  aviso()    { if (this.ctx) window.SonidoPato.aviso(); }
+};
 
 /* =============================================================
    Escena three.js
@@ -249,6 +166,22 @@ geoSombra.rotateX(-Math.PI / 2);
 const matSombra = new THREE.MeshBasicMaterial({
   color: 0x000000, transparent: true, opacity: 0.28, depthWrite: false
 });
+
+// Aro verde para revelar los patos que faltaban
+const geoAro = new THREE.RingGeometry(CONFIG.tamano * 0.62, CONFIG.tamano * 0.72, 40);
+const matAro = new THREE.MeshBasicMaterial({
+  color: 0x00ED64, transparent: true, opacity: 0.95, side: THREE.DoubleSide, depthTest: false
+});
+
+// Velo verde que "tine el entorno" cuando se acaba el tiempo
+const velo = new THREE.Mesh(
+  new THREE.SphereGeometry(6, 32, 16),
+  new THREE.MeshBasicMaterial({
+    color: 0x00ED64, transparent: true, opacity: 0, side: THREE.BackSide, depthWrite: false
+  })
+);
+velo.visible = false;
+scene.add(velo);
 
 /* ---------- Manos y controles ---------- */
 const manos = [renderer.xr.getHand(0), renderer.xr.getHand(1)];
@@ -319,6 +252,10 @@ const mensaje = crearPanel(0.6, 0.22, 1000, 366);
 const imgPatoHud = new Image();
 imgPatoHud.src = CONFIG.imagenPato;
 
+function tiempoRestante() {
+  return CONFIG.tiempoLimite > 0 ? CONFIG.tiempoLimite - estado.transcurrido : 0;
+}
+
 function dibujarHud() {
   fondoPanel(hud);
   const c = hud.ctx;
@@ -330,9 +267,22 @@ function dibujarHud() {
   c.fillStyle = '#FFFFFF';
   c.font = '700 58px ' + FUENTE_CIFRAS;
   c.fillText(estado.encontrados + '/' + CONFIG.totalPatos, 170, 136);
-  c.fillStyle = '#00ED64';
+
+  // Reloj: cuenta regresiva verde -> ambar -> rojo (parpadea)
+  let color = '#00ED64';
+  let reloj = formatearTiempo(estado.transcurrido);
+  if (CONFIG.tiempoLimite > 0) {
+    const restante = tiempoRestante();
+    reloj = formatearTiempo(restante);
+    if (restante <= CONFIG.avisoRojo * 1000) {
+      color = Math.floor(performance.now() / 300) % 2 ? '#FF5A5A' : '#FFB3B3';
+    } else if (restante <= CONFIG.avisoAmbar * 1000) {
+      color = '#FFC010';
+    }
+  }
+  c.fillStyle = color;
   c.font = '700 50px ' + FUENTE_CIFRAS;
-  c.fillText(formatearTiempo(estado.transcurrido).slice(0, 7), 370, 134);
+  c.fillText(reloj.slice(0, 7), 370, 134);
   hud.textura.needsUpdate = true;
 }
 
@@ -341,10 +291,10 @@ function mostrarMensaje(titulo, subtitulo, ms) {
   const c = mensaje.ctx;
   c.textAlign = 'center';
   c.fillStyle = '#FFFFFF';
-  c.font = '700 84px ' + FUENTE;
+  c.font = '700 80px ' + FUENTE;
   c.fillText(titulo, mensaje.ancho / 2, 160);
   c.fillStyle = '#C0FAE6';
-  c.font = '500 46px ' + FUENTE;
+  c.font = '500 44px ' + FUENTE;
   c.fillText(subtitulo, mensaje.ancho / 2, 262);
   c.textAlign = 'left';
   mensaje.textura.needsUpdate = true;
@@ -358,17 +308,21 @@ function mostrarMensaje(titulo, subtitulo, ms) {
    Estado de la partida
    ============================================================= */
 const estado = {
-  fase: 'fuera',          // fuera | colocando | jugando | fin
+  // fuera | colocando | jugando | revelando | ganado | perdido
+  fase: 'fuera',
+  nombre: '',
   encontrados: 0,
   inicio: 0,
   transcurrido: 0,
   ultimoTiempo: 0,
   inicioSesion: 0,
+  inicioRevelado: 0,
   proximaPista: 0,
-  ultimoHud: 0
+  ultimoHud: 0,
+  partida: 0               // sube en cada partida; evita temporizadores viejos
 };
 
-let patos = [];            // { grupo, malla, centro, atrapado, t0 }
+let patos = [];            // { grupo, malla, centro, atrapado, revelado, ... }
 let particulas = [];
 const camPos = new THREE.Vector3();
 const camDir = new THREE.Vector3();
@@ -439,7 +393,6 @@ function candidatosDePlanos(frame, refSpace) {
     });
     const area = (maxX - minX) * (maxZ - minZ);
     const esPiso = plano.semanticLabel === 'floor';
-    // Muebles: varios intentos; piso: mas, porque es grande
     const intentos = esPiso ? 40 : Math.min(25, Math.ceil(area * 30) + 4);
     const margen = CONFIG.tamano * 0.4;
 
@@ -521,6 +474,8 @@ function crearPato(pos, sobreSuperficie) {
     flota: !sobreSuperficie,
     fase: Math.random() * Math.PI * 2,
     atrapado: false,
+    revelado: false,
+    aro: null,
     t0: 0,
     sacudida: 0
   });
@@ -594,6 +549,7 @@ function atrapar(pato, i) {
 
   estado.encontrados++;
   dibujarHud();
+  if (window.EnVivo) window.EnVivo.actualizar({ encontrados: estado.encontrados });
 
   if (estado.encontrados >= CONFIG.totalPatos) terminarPartida();
 }
@@ -636,12 +592,23 @@ function animarConfeti(dt) {
 async function entrar() {
   const boton = $('#btn-entrar');
   const aviso = $('#estado-xr');
+
+  const nombre = $('#nombre').value.trim().replace(/\s+/g, ' ');
+  if (!nombre) {
+    aviso.textContent = 'Escribe tu nombre para jugar.';
+    aviso.className = 'estado-xr err';
+    $('#nombre').focus();
+    return;
+  }
+  estado.nombre = nombre.slice(0, 40);
+  try { localStorage.setItem(CLAVE_NOMBRE, estado.nombre); } catch (e) {}
+
   boton.disabled = true;
   aviso.textContent = 'Abriendo realidad mixta…';
   aviso.className = 'estado-xr';
 
   try {
-    await sonidos.iniciar();
+    sonidos.iniciar();   // el audio se habilita con este clic
     const sesion = await navigator.xr.requestSession('immersive-ar', {
       requiredFeatures: ['local-floor'],
       optionalFeatures: ['hand-tracking', 'plane-detection']
@@ -665,59 +632,122 @@ async function entrar() {
 }
 
 function empezarPartida(frame) {
+  estado.partida++;
   colocarPatos(frame);
   estado.fase = 'jugando';
   estado.encontrados = 0;
+  estado.transcurrido = 0;
   estado.inicio = performance.now();
   estado.proximaPista = estado.inicio + 4000;
+  velo.visible = false;
+  velo.material.opacity = 0;
   hud.malla.visible = true;
   dibujarHud();
   colocarFrente(hud.malla, 0.8, -0.32, true);
   mostrarMensaje('¡Encuentra ' + CONFIG.totalPatos + ' patos!',
                  'Míralos a tu alrededor y tócalos con la mano', 4500);
+  if (window.EnVivo) {
+    window.EnVivo.iniciar({ nombre: estado.nombre, modo: 'lentes', total: CONFIG.totalPatos });
+  }
 }
 
+/** Gano: encontro todos los patos */
 function terminarPartida() {
-  estado.fase = 'fin';
+  estado.fase = 'ganado';
   estado.ultimoTiempo = Math.round(estado.transcurrido);
   dibujarHud();
+  if (window.EnVivo) window.EnVivo.cerrar('ganado', { encontrados: estado.encontrados });
 
-  // Festejo: confeti frente al jugador y coro de cuacs
+  // Festejo: confeti frente al jugador, coro de cuacs y fanfarria
   const frente = new THREE.Vector3().copy(camPos).addScaledVector(
     new THREE.Vector3(camDir.x, 0, camDir.z).normalize(), 0.9);
   lanzarConfeti(frente, 140, 2.2);
   [0, 350, 700].forEach((ms, k) => setTimeout(() => {
     sonidos.cuac(new THREE.Vector3(frente.x + (k - 1) * 0.6, frente.y, frente.z), 0.8, 1);
   }, ms));
+  setTimeout(() => sonidos.victoria(), 1000);
 
-  mostrarMensaje('¡Los encontraste todos!', 'Tiempo: ' + formatearTiempo(estado.ultimoTiempo), 0);
+  const tiempo = formatearTiempo(estado.ultimoTiempo);
+  mostrarMensaje('¡Los encontraste todos!', 'Tiempo: ' + tiempo, 0);
 
+  // Solo las partidas completas entran al ranking; se guarda solo
+  guardarAutomatico().then((posicion) => {
+    if (posicion && estado.fase === 'ganado' && renderer.xr.isPresenting) {
+      mostrarMensaje('¡Los encontraste todos!', 'Tiempo: ' + tiempo + '  ·  Posición #' + posicion, 0);
+    }
+  });
+
+  const partida = estado.partida;
+  setTimeout(() => { if (estado.partida === partida && estado.fase === 'ganado') terminarSesion(); }, 5000);
+}
+
+/** Perdio: se acabo la cuenta regresiva */
+function tiempoAgotado() {
+  estado.fase = 'revelando';
+  estado.transcurrido = CONFIG.tiempoLimite;
+  estado.inicioRevelado = performance.now();
+  dibujarHud();
+  if (window.EnVivo) window.EnVivo.cerrar('perdido', { encontrados: estado.encontrados });
+
+  sonidos.aviso();
+
+  // El entorno se tine de verde y los patos que faltaban se marcan con un aro
+  velo.visible = true;
+  patos.forEach((p) => {
+    if (p.atrapado) return;
+    p.revelado = true;
+    p.aro = new THREE.Mesh(geoAro, matAro);
+    p.aro.position.y = CONFIG.tamano / 2;
+    p.aro.renderOrder = 5;
+    p.grupo.add(p.aro);
+  });
+  mostrarMensaje('¡Se acabó el tiempo!',
+                 estado.encontrados + ' / ' + CONFIG.totalPatos + ' patos encontrados',
+                 CONFIG.segundosRevelado * 1000);
+
+  const partida = estado.partida;
   setTimeout(() => {
-    const s = renderer.xr.getSession();
-    if (s) s.end();
-  }, 4000);
+    if (estado.partida !== partida || estado.fase !== 'revelando') return;
+    estado.fase = 'perdido';
+    terminarSesion();
+  }, CONFIG.segundosRevelado * 1000);
+}
+
+function terminarSesion() {
+  const s = renderer.xr.getSession();
+  if (s) s.end();
 }
 
 function alSalir() {
   contenedor.style.display = 'none';
   hud.malla.visible = false;
   mensaje.malla.visible = false;
+  velo.visible = false;
   limpiarPatos();
   particulas.forEach((p) => scene.remove(p.m));
   particulas = [];
 
-  const termino = estado.fase === 'fin';
+  const fase = estado.fase;
   estado.fase = 'fuera';
   $('#btn-entrar').disabled = false;
   $('#btn-entrar').textContent = 'Entrar en realidad mixta';
 
-  if (termino) {
+  if (fase === 'ganado') {
+    $('#titulo-fin').textContent = '¡Los encontraste todos! 🎉';
     $('#tiempo-final').textContent = formatearTiempo(estado.ultimoTiempo);
-    $('#aviso-guardado').textContent = '';
+    $('#tiempo-final').style.display = '';
+    $('#resumen-fin').textContent = CONFIG.totalPatos + ' / ' + CONFIG.totalPatos + ' patos encontrados';
+    abrirModal('#modal-fin');
+  } else if (fase === 'perdido' || fase === 'revelando') {
+    $('#titulo-fin').textContent = '¡Se acabó el tiempo! ⏰';
+    $('#tiempo-final').style.display = 'none';
+    $('#resumen-fin').textContent = estado.encontrados + ' / ' + CONFIG.totalPatos + ' patos encontrados';
+    $('#aviso-guardado').textContent = 'Solo las partidas completas entran al ranking.';
     $('#aviso-guardado').className = 'aviso';
-    $('#btn-guardar').disabled = false;
     abrirModal('#modal-fin');
   } else {
+    // Salio con el boton de Meta a media partida
+    if (window.EnVivo) window.EnVivo.cerrar('abandonado', { encontrados: estado.encontrados });
     $('#estado-xr').textContent = 'Saliste antes de terminar. ¡Inténtalo otra vez!';
     $('#estado-xr').className = 'estado-xr';
     abrirModal('#modal-inicio');
@@ -751,8 +781,12 @@ renderer.setAnimationLoop((tiempo, frame) => {
     if (ahora - estado.ultimoHud > 100) { estado.ultimoHud = ahora; dibujarHud(); }
     revisarToques();
 
+    if (CONFIG.tiempoLimite > 0 && estado.fase === 'jugando' && tiempoRestante() <= 0) {
+      tiempoAgotado();
+    }
+
     // Pista sonora: un pato escondido hace "cuac" suave
-    if (CONFIG.pistaSonora && ahora > estado.proximaPista) {
+    if (estado.fase === 'jugando' && CONFIG.pistaSonora && ahora > estado.proximaPista) {
       const vivos = patos.filter((p) => !p.atrapado);
       if (vivos.length) {
         const p = vivos[Math.floor(Math.random() * vivos.length)];
@@ -761,6 +795,13 @@ renderer.setAnimationLoop((tiempo, frame) => {
       }
       estado.proximaPista = ahora + aleatorio(CONFIG.pistaCadaMs[0], CONFIG.pistaCadaMs[1]);
     }
+  }
+
+  // Velo verde: aparece suave y sigue la cabeza
+  if (velo.visible) {
+    velo.position.copy(camPos);
+    const k = Math.min(1, (ahora - estado.inicioRevelado) / 600);
+    velo.material.opacity = 0.32 * k;
   }
 
   if (hud.malla.visible) colocarFrente(hud.malla, 0.8, -0.32, false);
@@ -778,6 +819,18 @@ renderer.setAnimationLoop((tiempo, frame) => {
       p.malla.scale.set(Math.sign(p.malla.scale.x) * s, s, s);
       p.malla.position.y = k * 0.25;
       p.malla.rotation.y = k * Math.PI * 2;
+      return true;
+    }
+
+    if (p.revelado) {
+      // Revelado: el pato salta y el aro late
+      const s = 1.25 + Math.sin(t * 6) * 0.12;
+      p.malla.scale.set(Math.sign(p.malla.scale.x) * s, s, s);
+      p.malla.position.y = Math.abs(Math.sin(t * 5 + p.fase)) * 0.06;
+      if (p.aro) {
+        p.aro.position.y = CONFIG.tamano / 2 * s + p.malla.position.y;
+        p.aro.scale.setScalar(s * (1 + Math.sin(t * 6) * 0.08));
+      }
       return true;
     }
 
@@ -814,7 +867,7 @@ async function cargarRanking(destacarNombre, destacarMs) {
   const caja = $('#tabla-ranking');
   caja.innerHTML = 'Cargando...';
   try {
-    const res = await fetch('api.php?accion=ranking&limite=10&modo=mr', { cache: 'no-store' });
+    const res = await fetch('api.php?accion=ranking&limite=10', { cache: 'no-store' });
     const datos = await res.json();
     if (!datos.ok) throw new Error(datos.error || 'Error');
     if (!datos.ranking.length) {
@@ -839,36 +892,27 @@ async function cargarRanking(destacarNombre, destacarMs) {
   }
 }
 
-async function guardarTiempo(ev) {
-  ev.preventDefault();
-  const nombre = $('#nombre').value.trim();
+/** Guarda el tiempo con el nombre de la portada. Devuelve la posicion o null. */
+async function guardarAutomatico() {
   const aviso = $('#aviso-guardado');
-  const boton = $('#btn-guardar');
-  if (!nombre) { aviso.textContent = 'Escribe tu nombre.'; aviso.className = 'aviso err'; return; }
-
-  boton.disabled = true;
-  aviso.textContent = 'Guardando...';
+  aviso.textContent = 'Guardando tiempo de ' + estado.nombre + '...';
   aviso.className = 'aviso';
   try {
-    const res = await fetch('api.php?accion=guardar&modo=mr', {
+    const res = await fetch('api.php?accion=guardar', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nombre, milisegundos: estado.ultimoTiempo,
+      body: JSON.stringify({ nombre: estado.nombre, milisegundos: estado.ultimoTiempo,
                              patos: CONFIG.totalPatos })
     });
     const datos = await res.json();
     if (!datos.ok) throw new Error(datos.error || 'No se pudo guardar');
     aviso.textContent = 'Guardado. Posición #' + datos.posicion + ' del ranking.';
     aviso.className = 'aviso ok';
-    setTimeout(() => {
-      cerrarModal('#modal-fin');
-      abrirModal('#modal-ranking');
-      cargarRanking(nombre, estado.ultimoTiempo);
-    }, 900);
+    return datos.posicion;
   } catch (e) {
-    aviso.textContent = 'Error: ' + e.message;
+    aviso.textContent = 'No se pudo guardar el tiempo.';
     aviso.className = 'aviso err';
-    boton.disabled = false;
+    return null;
   }
 }
 
@@ -876,19 +920,33 @@ function volverAJugar() {
   cerrarModales();
   abrirModal('#modal-inicio');
   $('#estado-xr').textContent = '';
+  $('#aviso-guardado').textContent = '';
 }
 
 async function inicializar() {
   // Precargar las fuentes de marca para dibujarlas en los paneles 3D
   if (document.fonts && document.fonts.load) {
-    ['700 50px "Source Code Pro"', '700 84px "Euclid Circular A"'].forEach((f) =>
+    ['700 50px "Source Code Pro"', '700 80px "Euclid Circular A"'].forEach((f) =>
       document.fonts.load(f).catch(() => {}));
   }
   $('#txt-total').textContent = String(CONFIG.totalPatos);
+  $('#txt-limite').textContent = CONFIG.tiempoLimite > 0
+    ? Math.floor(CONFIG.tiempoLimite / 60000) + ':' +
+      String(Math.round(CONFIG.tiempoLimite / 1000) % 60).padStart(2, '0') + ' minutos'
+    : 'todo el tiempo que quieras';
+  try { $('#nombre').value = localStorage.getItem(CLAVE_NOMBRE) || ''; } catch (e) {}
+
   $('#btn-entrar').addEventListener('click', entrar);
+  $('#nombre').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !$('#btn-entrar').disabled) entrar();
+  });
   $('#btn-otra').addEventListener('click', volverAJugar);
   $('#btn-cerrar-ranking').addEventListener('click', volverAJugar);
-  $('#form-nombre').addEventListener('submit', guardarTiempo);
+  $('#btn-ver-ranking').addEventListener('click', () => {
+    cerrarModal('#modal-fin');
+    abrirModal('#modal-ranking');
+    cargarRanking(estado.nombre, estado.ultimoTiempo);
+  });
 
   window.addEventListener('resize', () => {
     if (renderer.xr.isPresenting) return;

@@ -440,3 +440,37 @@ td.marca {
   flex: 0 0 auto;
   filter: drop-shadow(0 2px 6px rgba(0, 0, 0, .4));
 }
+
+/* ===== Cuenta regresiva ===== */
+.hud-tiempo { display: inline-block; transition: color .3s; }
+.hud-tiempo.ambar { color: #FFC010; }
+.hud-tiempo.rojo  { color: #FF5A5A; animation: latir .6s ease-in-out infinite; }
+
+@keyframes latir {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.14); }
+}
+
+/* ===== Tiempo agotado: el fondo se tine de verde y se revelan los patos ===== */
+#fondo { transition: filter .6s ease; }
+#escenario.agotado #fondo {
+  filter: grayscale(1) sepia(1) hue-rotate(85deg) saturate(3.2) brightness(.7);
+}
+
+.pato.revelado {
+  opacity: 1;
+  mix-blend-mode: normal;
+  filter: none;
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px #00ED64, 0 0 26px 6px rgba(0, 237, 100, .85);
+  animation: revelar 1s ease-in-out infinite;
+}
+
+@keyframes revelar {
+  0%, 100% { transform: rotate(var(--giro, 0deg)) scaleX(var(--espejo, 1)) scale(1); }
+  50%      { transform: rotate(var(--giro, 0deg)) scaleX(var(--espejo, 1)) scale(1.25); }
+}
+
+/* ===== Portada: nombre del jugador ===== */
+.campo-nombre { margin: 0 auto 18px; max-width: 360px; text-align: left; }
+.resumen-fin { font-size: clamp(18px, 2.6vw, 24px) !important; color: var(--texto-claro) !important; }

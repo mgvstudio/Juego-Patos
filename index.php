@@ -2,7 +2,7 @@
 /**
  * Encuentra los patos - juego para tableta / pantalla completa.
  */
-$version = '2.7.0';
+$version = '3.0.0';
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -81,8 +81,14 @@ $version = '2.7.0';
       <p>Hay <strong id="txt-total">5</strong> patos escondidos en la imagen.
          Tócalos para atraparlos lo más rápido que puedas.</p>
       <p class="ayuda">No se ve toda la escena a la vez: <strong>arrastra para recorrerla</strong>
-         y acerca con dos dedos (pellizco) para mirar de cerca.</p>
+         y acerca con dos dedos (pellizco) para mirar de cerca.
+         Tienes <strong id="txt-limite">1:30 minutos</strong>.</p>
+      <div class="campo-nombre">
+        <label for="nombre">Tu nombre (para el ranking)</label>
+        <input type="text" id="nombre" name="nombre" maxlength="40" placeholder="Tu nombre" autocomplete="off">
+      </div>
       <button type="button" class="btn btn-grande" id="btn-jugar">Jugar</button>
+      <p class="aviso" id="aviso-inicio"></p>
       <!-- Solo se muestra en visores con realidad mixta (Meta Quest 3) -->
       <p id="caja-mr" style="display:none;margin:16px 0 0">
         <a class="btn btn-sec" href="realidad-mixta.php">Jugar en realidad mixta (Meta Quest)</a>
@@ -93,16 +99,13 @@ $version = '2.7.0';
   <!-- ===== Fin de partida ===== -->
   <div class="modal" id="modal-fin">
     <div class="tarjeta">
-      <h2>¡Los encontraste todos! 🎉</h2>
+      <h2 id="titulo-fin">¡Los encontraste todos! 🎉</h2>
       <p class="tiempo-final" id="tiempo-final">00:00.0</p>
-      <form id="form-nombre" autocomplete="off">
-        <label for="nombre">Escribe tu nombre para el ranking</label>
-        <input type="text" id="nombre" name="nombre" maxlength="40" placeholder="Tu nombre" required>
-        <div class="fila-botones">
-          <button type="submit" class="btn btn-grande" id="btn-guardar">Guardar tiempo</button>
-          <button type="button" class="btn btn-sec" id="btn-otra">Jugar otra vez</button>
-        </div>
-      </form>
+      <p class="resumen-fin" id="resumen-fin"></p>
+      <div class="fila-botones">
+        <button type="button" class="btn btn-grande" id="btn-otra">Jugar otra vez</button>
+        <button type="button" class="btn btn-sec" id="btn-ver-ranking">Ranking</button>
+      </div>
       <p class="aviso" id="aviso-guardado"></p>
       <img class="pie-marca" src="assets/img/mongodb-hoja-verde.svg" alt="MongoDB">
     </div>
@@ -120,6 +123,8 @@ $version = '2.7.0';
 
 </div>
 
+<script src="assets/js/sonido-pato.js?v=<?= $version ?>"></script>
+<script src="assets/js/en-vivo.js?v=<?= $version ?>"></script>
 <script src="assets/js/game.js?v=<?= $version ?>"></script>
 </body>
 </html>

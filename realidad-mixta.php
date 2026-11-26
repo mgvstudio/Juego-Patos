@@ -6,8 +6,9 @@
  *
  * Requisitos: abrir en el navegador del Quest y servir por HTTPS
  * (WebXR no funciona en http:// salvo en localhost).
+ * Three.js va en assets/js/vendor: funciona sin salida a internet.
  */
-$version = '1.0.0';
+$version = '2.0.0';
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -39,8 +40,12 @@ $version = '1.0.0';
     <p>Realidad mixta: hay <strong id="txt-total">8</strong> patos escondidos
        <strong>en tu habitación</strong>. Búscalos a tu alrededor y
        <strong>tócalos con la mano</strong> (o con el control) para atraparlos.</p>
-    <p class="ayuda">Si te pierdes, escucha: los patos hacen “cuac” de vez en cuando
-       y el sonido viene de donde están escondidos.</p>
+    <p class="ayuda">Tienes <strong id="txt-limite">1:30 minutos</strong>. Si te pierdes, escucha:
+       los patos hacen “cuac” de vez en cuando y el sonido viene de donde están escondidos.</p>
+    <div class="campo-nombre">
+      <label for="nombre">Tu nombre (para el ranking)</label>
+      <input type="text" id="nombre" name="nombre" maxlength="40" placeholder="Tu nombre" autocomplete="off">
+    </div>
     <button type="button" class="btn btn-grande" id="btn-entrar" disabled>Comprobando visor…</button>
     <p class="estado-xr" id="estado-xr"></p>
     <p class="ayuda"><a class="enlace" href="index.php">Jugar la versión de tableta</a></p>
@@ -52,14 +57,11 @@ $version = '1.0.0';
   <div class="tarjeta">
     <h2 id="titulo-fin">¡Los encontraste todos! 🎉</h2>
     <p class="tiempo-final" id="tiempo-final">00:00.0</p>
-    <form id="form-nombre" autocomplete="off">
-      <label for="nombre">Escribe tu nombre para el ranking</label>
-      <input type="text" id="nombre" name="nombre" maxlength="40" placeholder="Tu nombre" required>
-      <div class="fila-botones">
-        <button type="submit" class="btn btn-grande" id="btn-guardar">Guardar tiempo</button>
-        <button type="button" class="btn btn-sec" id="btn-otra">Jugar otra vez</button>
-      </div>
-    </form>
+    <p class="resumen-fin" id="resumen-fin"></p>
+    <div class="fila-botones">
+      <button type="button" class="btn btn-grande" id="btn-otra">Jugar otra vez</button>
+      <button type="button" class="btn btn-sec" id="btn-ver-ranking">Ranking</button>
+    </div>
     <p class="aviso" id="aviso-guardado"></p>
   </div>
 </div>
@@ -67,7 +69,7 @@ $version = '1.0.0';
 <!-- ===== Ranking ===== -->
 <div class="modal" id="modal-ranking">
   <div class="tarjeta">
-    <h2>🏆 Mejores tiempos (realidad mixta)</h2>
+    <h2>🏆 Mejores tiempos</h2>
     <div id="tabla-ranking" class="tabla-scroll">Cargando…</div>
     <button type="button" class="btn" id="btn-cerrar-ranking">Jugar otra vez</button>
   </div>
@@ -75,6 +77,8 @@ $version = '1.0.0';
 
 <div id="lienzo-xr"></div>
 
+<script src="assets/js/sonido-pato.js?v=<?= $version ?>"></script>
+<script src="assets/js/en-vivo.js?v=<?= $version ?>"></script>
 <script type="module" src="assets/js/mr.js?v=<?= $version ?>"></script>
 </body>
 </html>
