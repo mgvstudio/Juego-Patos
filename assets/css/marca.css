@@ -1,0 +1,126 @@
+/* =============================================================
+   MARCA - tipografias y paleta
+   -------------------------------------------------------------
+   Todo lo visual de marca vive aqui. Cambiando las variables
+   de :root se rebrandea el juego completo sin tocar style.css
+   ============================================================= */
+
+/* ---------- Tipografias ---------- */
+
+/* Euclid Circular A - tipografia de interfaz de MongoDB */
+@font-face {
+  font-family: 'Euclid Circular A';
+  src: url('../fonts/EuclidCircularA-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Euclid Circular A';
+  src: url('../fonts/EuclidCircularA-RegularItalic.ttf') format('truetype');
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Euclid Circular A';
+  src: url('../fonts/EuclidCircularA-Medium.ttf') format('truetype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Euclid Circular A';
+  src: url('../fonts/EuclidCircularA-MediumItalic.ttf') format('truetype');
+  font-weight: 500;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* MongoDB Value Serif - titulares de marca */
+@font-face {
+  font-family: 'MongoDB Value Serif';
+  src: url('../fonts/MongoDBValueSerif-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Source Code Pro - cifras monoespaciadas (cronometro y tiempos) */
+@font-face {
+  font-family: 'Source Code Pro';
+  src: url('../fonts/SourceCodePro-SemiBold.ttf') format('truetype');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Everett - familia complementaria */
+@font-face {
+  font-family: 'Everett';
+  src: url('../fonts/Everett-Light.otf') format('opentype');
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Everett';
+  src: url('../fonts/Everett-Regular.otf') format('opentype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Everett';
+  src: url('../fonts/Everett-Medium.otf') format('opentype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Everett Jana';
+  src: url('../fonts/Everett-Jana.otf') format('opentype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ---------- Variables de marca ---------- */
+:root {
+  /* Familias */
+  --fuente-ui:     'Euclid Circular A', 'Everett', system-ui, -apple-system, sans-serif;
+  --fuente-titulo: 'MongoDB Value Serif', 'Everett', Georgia, serif;
+  --fuente-cifras: 'Source Code Pro', ui-monospace, 'Courier New', monospace;
+
+  /* Paleta oficial MongoDB */
+  --verde-base:    #00ED64;   /* Spring Green - color principal */
+  --verde-oscuro:  #00684A;   /* Forest Green */
+  --verde-medio:   #00A35C;
+  --verde-claro:   #C0FAE6;
+  --verde-fondo:   #E3FCF7;
+
+  --azul-profundo: #001E2B;   /* Slate Blue - fondo oscuro de marca */
+  --azul-noche:    #023430;
+  --azul-panel:    #112733;
+  --azul-borde:    #1C2D38;
+
+  --texto-claro:   #FFFFFF;
+  --texto-suave:   #B8C4C2;
+  --texto-oscuro:  #001E2B;
+
+  --rojo:          #FF6960;   /* estados de error */
+
+  /* Superficies del juego */
+  --fondo-app:     var(--azul-profundo);
+  --fondo-hud:     linear-gradient(180deg, #001E2B 0%, #023430 100%);
+  --fondo-tarjeta: linear-gradient(160deg, #023430, #001E2B);
+  --fondo-velo:    rgba(0, 30, 43, .88);
+
+  /* Acentos de interaccion */
+  --acento:        var(--verde-base);
+  --acento-texto:  var(--texto-oscuro);
+
+  /* Forma */
+  --radio-boton:   999px;
+  --radio-tarjeta: 24px;
+}

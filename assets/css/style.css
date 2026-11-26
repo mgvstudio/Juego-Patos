@@ -1,0 +1,442 @@
+/* ===== Base ===== */
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--fondo-app);
+  color: var(--texto-claro);
+  font-family: var(--fuente-ui);
+  overscroll-behavior: none;
+  touch-action: manipulation;
+  user-select: none;
+}
+
+#app { display: flex; flex-direction: column; height: 100%; }
+
+/* ===== Marcador superior (HUD) ===== */
+#hud {
+  position: relative;          /* referencia del logo centrado */
+  max-height: 15vh;            /* el marcador nunca invade el escenario */
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px clamp(12px, 2vw, 28px);
+  padding-top: max(10px, env(safe-area-inset-top));
+  background: var(--fondo-hud);
+  border-bottom: 1px solid var(--azul-borde);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, .45);
+  z-index: 30;
+}
+
+.hud-bloque { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+/* Patos y tiempo juntos a la izquierda, para dejar libre el centro */
+.hud-izq {
+  display: flex;
+  align-items: center;
+  gap: clamp(16px, 3vw, 40px);
+  min-width: 0;
+}
+.hud-acciones { flex-direction: row; align-items: center; gap: 8px; }
+
+/* Logo de marca centrado en el marcador, por encima del reparto flex */
+/* Logo de marca en la esquina izquierda del marcador */
+.hud-logo {
+  flex: 0 0 auto;
+  height: clamp(18px, 2.2vw, 26px);
+  max-height: 26px;
+  width: auto;
+  max-width: 22%;
+  object-fit: contain;
+  margin-right: clamp(8px, 2vw, 26px);
+  pointer-events: none;
+}
+
+.hud-etiqueta {
+  font-size: clamp(10px, 1.3vw, 13px);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--texto-suave);
+}
+
+.hud-valor {
+  font-size: clamp(20px, 3.4vw, 34px);
+  font-weight: 800;
+  line-height: 1;
+}
+
+.hud-tiempo {
+  font-family: var(--fuente-cifras);
+  font-variant-numeric: tabular-nums;
+  color: var(--verde-base);
+}
+
+/* Pistas: un icono por pato, se ilumina al encontrarlo */
+#pistas { display: flex; gap: 6px; margin-top: 4px; }
+
+.pista {
+  width: clamp(16px, 2.4vw, 24px);
+  height: clamp(16px, 2.4vw, 24px);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .14);
+  border: 2px solid rgba(255, 255, 255, .3);
+  transition: transform .25s, background .25s, border-color .25s;
+}
+
+.pista.ok {
+  background: var(--verde-base);
+  border-color: var(--verde-claro);
+  transform: scale(1.18);
+  box-shadow: 0 0 14px rgba(0, 237, 100, .75);
+}
+
+/* ===== Botones ===== */
+.btn {
+  appearance: none;
+  border: 0;
+  border-radius: var(--radio-boton);
+  padding: clamp(10px, 1.4vw, 14px) clamp(16px, 2.4vw, 26px);
+  font-size: clamp(14px, 1.7vw, 18px);
+  font-weight: 700;
+  color: var(--acento-texto);
+  background: var(--acento);
+  font-family: var(--fuente-ui);
+  cursor: pointer;
+  transition: transform .12s, filter .12s;
+  white-space: nowrap;
+}
+
+.btn:hover { filter: brightness(1.07); }
+.btn:active { transform: scale(.95); }
+
+.btn-sec {
+  background: transparent;
+  color: var(--texto-claro);
+  box-shadow: inset 0 0 0 2px var(--azul-borde);
+}
+
+.btn-sec:hover { background: rgba(0, 237, 100, .12); }
+.btn-grande { font-size: clamp(16px, 2.2vw, 22px); padding: 16px 34px; }
+
+/* ===== Escenario ===== */
+#escenario {
+  flex: 1 1 auto;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: var(--azul-profundo);
+  min-height: 0;
+  touch-action: none;          /* el zoom/paneo lo controla el juego */
+  cursor: grab;
+}
+
+#escenario:active { cursor: grabbing; }
+
+/* El tamano exacto (en px) lo calcula ajustarLienzo() en game.js para que
+   coincida al pixel con la imagen; asi la capa de patos queda alineada
+   siempre, tambien en pantalla completa. */
+#lienzo {
+  position: relative;
+  line-height: 0;
+  max-width: 100%;
+  max-height: 100%;
+  transform-origin: 0 0;       /* base para el zoom con dos dedos */
+  will-change: transform;
+}
+
+#lienzo.con-zoom { cursor: grabbing; }
+
+#fondo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;    /* el lienzo ya tiene la proporcion correcta */
+  pointer-events: none;
+}
+
+/* Capa de patos: independiente del fondo */
+#capa-patos {
+  position: absolute;
+  inset: 0;
+  /* Sin z-index a proposito: asi los patos pueden fundirse con el fondo
+     (mix-blend-mode). Igual quedan encima por el orden del HTML. */
+  isolation: auto;
+}
+
+/* ===== Patos ===== */
+.pato {
+  position: absolute;
+  cursor: pointer;
+  transform-origin: center;
+  will-change: transform, opacity;
+  transition: transform .18s ease-out;
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  background-origin: content-box;   /* el dibujo no invade el margen de toque */
+  background-clip: content-box;
+  box-sizing: content-box;
+  transform: rotate(var(--giro, 0deg)) scaleX(var(--espejo, 1));
+
+  /* Camuflaje: los patos se funden con la ilustracion.
+     Los valores los define CONFIG en game.js */
+  opacity: var(--opacidad, .55);
+  mix-blend-mode: var(--mezcla, multiply);
+  filter: saturate(var(--saturacion, .75)) contrast(var(--contraste, .9));
+}
+
+/* Al atraparlo se muestra nitido antes de estallar */
+.pato.encontrado {
+  opacity: 1;
+  mix-blend-mode: normal;
+  filter: none;
+}
+
+.pato.encontrado {
+  animation: estallar .45s ease-out forwards;
+  pointer-events: none;
+}
+
+@keyframes estallar {
+  0%   { transform: rotate(var(--giro, 0deg)) scaleX(var(--espejo, 1)) scale(1);   opacity: 1; }
+  35%  { transform: rotate(var(--giro, 0deg)) scaleX(var(--espejo, 1)) scale(1.6); opacity: 1; }
+  100% { transform: rotate(var(--giro, 0deg)) scaleX(var(--espejo, 1)) scale(0);   opacity: 0; }
+}
+
+/* ===== Confeti ===== */
+#confeti {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+}
+
+/* ===== Modales ===== */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: var(--fondo-velo);
+  backdrop-filter: blur(6px);
+}
+
+.modal.activa { display: flex; }
+
+.tarjeta {
+  width: min(560px, 100%);
+  max-height: 90vh;
+  overflow: auto;
+  background: var(--fondo-tarjeta);
+  border: 1px solid var(--azul-borde);
+  border-radius: var(--radio-tarjeta);
+  padding: clamp(22px, 4vw, 38px);
+  text-align: center;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .55);
+  animation: entrar .28s ease-out;
+}
+
+@keyframes entrar {
+  from { opacity: 0; transform: translateY(18px) scale(.96); }
+  to   { opacity: 1; transform: none; }
+}
+
+.tarjeta h1 {
+  margin: 0 0 12px;
+  font-family: var(--fuente-titulo);
+  font-weight: 400;
+  font-size: clamp(26px, 5vw, 42px);
+}
+.tarjeta h2 {
+  margin: 0 0 12px;
+  font-family: var(--fuente-titulo);
+  font-weight: 400;
+  font-size: clamp(22px, 4vw, 32px);
+}
+.tarjeta p  { margin: 0 0 20px; color: var(--texto-suave); font-size: clamp(14px, 2vw, 18px); line-height: 1.5; }
+
+.tiempo-final {
+  font-size: clamp(38px, 8vw, 64px) !important;
+  font-weight: 800;
+  color: var(--verde-base) !important;
+  font-family: var(--fuente-cifras);
+  font-variant-numeric: tabular-nums;
+  margin: 6px 0 22px !important;
+}
+
+label { display: block; margin-bottom: 8px; font-size: 14px; color: var(--texto-suave); }
+
+input[type="text"] {
+  width: 100%;
+  padding: 14px 18px;
+  border-radius: 14px;
+  border: 2px solid var(--azul-borde);
+  background: rgba(0, 0, 0, .3);
+  color: var(--texto-claro);
+  font-family: var(--fuente-ui);
+  font-size: 18px;
+  text-align: center;
+  margin-bottom: 18px;
+}
+
+input[type="text"]:focus { outline: none; border-color: var(--verde-base); }
+
+.fila-botones { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+
+.aviso { margin: 16px 0 0 !important; min-height: 22px; font-weight: 600; }
+.aviso.ok  { color: var(--verde-base) !important; }
+.aviso.err { color: var(--rojo) !important; }
+
+/* ===== Tabla de ranking ===== */
+.tabla-scroll { max-height: 46vh; overflow: auto; margin-bottom: 18px; }
+
+table { width: 100%; border-collapse: collapse; font-size: clamp(14px, 1.8vw, 17px); }
+
+th, td { padding: 10px 12px; text-align: left; }
+
+th {
+  position: sticky;
+  top: 0;
+  background: var(--azul-profundo);
+  color: var(--texto-suave);
+  font-size: 12px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+tbody tr { border-top: 1px solid var(--azul-borde); }
+tbody tr.destacada { background: rgba(0, 237, 100, .16); }
+
+td.pos   { width: 52px; font-weight: 700; color: var(--verde-base); }
+td.marca {
+  text-align: right;
+  font-family: var(--fuente-cifras);
+  font-variant-numeric: tabular-nums;
+}
+
+.vacio { padding: 26px; color: var(--texto-suave); }
+
+/* ===== Pantallas angostas ===== */
+@media (max-width: 720px) {
+  #hud { flex-wrap: wrap; justify-content: center; text-align: center; }
+  .hud-acciones { width: 100%; justify-content: center; }
+  #pistas { justify-content: center; }
+}
+
+.ayuda { font-size: clamp(12px, 1.6vw, 15px) !important; color: var(--texto-suave) !important; }
+
+/* ===== Marca ===== */
+.logo-portada {
+  display: block;
+  width: min(260px, 62%);
+  height: auto;
+  margin: 0 auto 22px;
+}
+
+/* Hoja discreta al pie de las tarjetas */
+.pie-marca {
+  display: block;
+  height: 26px;
+  width: auto;
+  margin: 24px auto 0;
+  opacity: .55;
+}
+
+@media (max-width: 900px) {
+  .hud-izq { justify-content: center; width: 100%; }
+
+  .hud-logo {
+    order: -1;
+    height: 18px;
+    max-height: 18px;
+    max-width: 55%;
+    margin: 0 auto 4px;
+  }
+}
+
+/* ===== Pantalla de arranque ===== */
+#splash {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--azul-profundo);
+  transition: opacity .55s ease, visibility .55s;
+}
+
+#splash.oculto { opacity: 0; visibility: hidden; }
+
+.splash-caja {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(16px, 3vh, 30px);
+  animation: aparecer-logo .9s cubic-bezier(.2, .8, .3, 1) both;
+}
+
+.splash-logo {
+  width: min(380px, 62vw);
+  height: auto;
+  display: block;
+}
+
+
+@keyframes aparecer-logo {
+  from { opacity: 0; transform: translateY(16px) scale(.94); }
+  to   { opacity: 1; transform: none; }
+}
+
+.splash-barra {
+  width: min(260px, 50vw);
+  height: 4px;
+  border-radius: 999px;
+  background: var(--azul-borde);
+  overflow: hidden;
+}
+
+.splash-barra span {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: var(--verde-base);
+  animation: cargar-barra 1.5s ease-out forwards;
+}
+
+@keyframes cargar-barra {
+  from { width: 0; }
+  to   { width: 100%; }
+}
+
+/* ===== Icono de pato junto al contador ===== */
+#hud-patos {
+  flex-direction: row;
+  align-items: center;
+  gap: clamp(8px, 1.2vw, 14px);
+}
+
+.hud-patos-datos {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.icono-pato {
+  height: clamp(30px, 4vw, 46px) !important;
+  max-height: 46px;
+  width: auto !important;
+  display: block;
+  flex: 0 0 auto;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, .4));
+}
