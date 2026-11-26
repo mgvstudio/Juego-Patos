@@ -8,7 +8,7 @@
  * (WebXR no funciona en http:// salvo en localhost).
  * Three.js va en assets/js/vendor: funciona sin salida a internet.
  */
-$version = '2.0.0';
+$version = '2.2.0';
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -46,9 +46,15 @@ $version = '2.0.0';
       <label for="nombre">Tu nombre (para el ranking)</label>
       <input type="text" id="nombre" name="nombre" maxlength="40" placeholder="Tu nombre" autocomplete="off">
     </div>
-    <button type="button" class="btn btn-grande" id="btn-entrar" disabled>Comprobando visor…</button>
+    <div class="fila-botones">
+      <button type="button" class="btn btn-grande" id="btn-entrar" disabled>Comprobando visor…</button>
+      <button type="button" class="btn btn-grande btn-sec" id="btn-entrar-360" disabled>Comprobando visor…</button>
+    </div>
+    <p class="ayuda"><strong>Realidad mixta:</strong> patos en tu habitación, se tocan con la mano.
+       <strong>360:</strong> una imagen te rodea y los patos están camuflados en ella; apunta y haz pinza.</p>
     <p class="estado-xr" id="estado-xr"></p>
-    <p class="ayuda"><a class="enlace" href="index.php">Jugar la versión de tableta</a></p>
+    <p class="ayuda"><a class="enlace" href="vr.php">Realidad virtual con la imagen</a> ·
+       <a class="enlace" href="index.php">Versión de tableta</a></p>
   </div>
 </div>
 

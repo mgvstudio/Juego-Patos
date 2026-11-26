@@ -10,6 +10,9 @@
    - Al tocarlos suena "cuac" en audio 3D (sale desde el pato).
    - Mismas reglas que la tableta: 5 patos, 1:30 de cuenta
      regresiva, revelado al acabarse el tiempo, ranking compartido.
+   - MODO 360 (opcional): en vez de la habitacion, una imagen 360
+     rodea al jugador y los patos estan camuflados en ella. Se
+     atrapan apuntando con la mano (pinza) o con el gatillo.
    ============================================================= */
 import * as THREE from './vendor/three.module.js';
 
@@ -50,7 +53,19 @@ const CONFIG = {
   // Pistas sonoras: un pato al azar hace "cuac" suave cada cierto tiempo
   pistaSonora: true,
   pistaCadaMs: [6000, 10000],
-  volumenPista: 0.35
+  volumenPista: 0.35,
+
+  // ---- Modo 360 ----
+  // Imagen que rodea al jugador. Si es 2:1 (equirectangular) se muestra
+  // como esfera completa; si no, como pantalla curva de "arcoGrados".
+  imagen360: 'mundo3.jpg',
+  imagen360Respaldo: 'background6.jpg',   // si falta la anterior
+  radio360: 8,                 // metros del jugador a la imagen
+  arcoGrados: 190,             // envolvencia de la pantalla curva (180-240)
+  tamano360Min: 1.8,           // tamano del pato en % del ancho de la imagen
+  tamano360Max: 2.8,
+  opacidad360: 0.62,           // camuflaje del pato sobre la imagen
+  toleranciaApuntado: 1.9      // generosidad de la punteria (1 = exacta)
 };
 
 const CLAVE_NOMBRE = 'patos.nombre';   // misma clave que la tableta
@@ -113,7 +128,8 @@ const sonidos = {
     const panner = new PannerNode(ctx, {
       panningModel: 'HRTF',
       distanceModel: 'inverse',
-      refDistance: 0.6,
+      // En 360 los patos estan a ~8 m: sin esto casi no se oirian
+      refDistance: estado.modo === '360' ? CONFIG.radio360 * 0.6 : 0.6,
       rolloffFactor: 1.2,
       positionX: pos.x, positionY: pos.y, positionZ: pos.z
     });
@@ -183,6 +199,80 @@ const velo = new THREE.Mesh(
 velo.visible = false;
 scene.add(velo);
 
+/* ---------- Mundo 360 ---------- */
+// Material del pato camuflado sobre la imagen (los revelados usan matPato)
+const matPato360 = new THREE.MeshBasicMaterial({
+  map: texturaPato, transparent: true, alphaTest: 0.15, side: THREE.DoubleSide,
+  opacity: CONFIG.opacidad360, color: 0xdfe8e4, depthWrite: false
+});
+
+const mundo = {
+  textura: null,
+  malla: null,
+  esfera: false,      // true = 360 completo; false = pantalla curva
+  arco: 0,            // radianes
+  inicioArco: 0,
+  alto: 0,            // metros (pantalla curva)
+  centroY: 1.6,
+  anchoM: 0           // ancho de la imagen en metros (para el tamano del pato)
+};
+
+// Se precarga al abrir la pagina para no demorar la entrada al visor
+function precargar360() {
+  const cargador = new THREE.TextureLoader();
+  const usar = (tex, nombre) => {
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.repeat.x = -1;          // se ve por dentro: corregir el espejo
+    tex.anisotropy = 4;
+    mundo.textura = tex;
+    mundo.nombre = nombre;
+  };
+  cargador.load(CONFIG.imagen360, (t) => usar(t, CONFIG.imagen360), undefined, () => {
+    console.warn('No se encontro ' + CONFIG.imagen360 + '; se usa ' + CONFIG.imagen360Respaldo);
+    cargador.load(CONFIG.imagen360Respaldo, (t) => usar(t, CONFIG.imagen360Respaldo));
+  });
+}
+
+function construirMundo(alturaOjos) {
+  quitarMundo();
+  const img = mundo.textura.image;
+  const aspecto = img.width / img.height;
+  const r = CONFIG.radio360;
+  mundo.centroY = alturaOjos;
+  mundo.esfera = aspecto > 1.9;
+
+  let geo;
+  if (mundo.esfera) {
+    // Equirectangular: esfera completa alrededor del jugador
+    geo = new THREE.SphereGeometry(r, 64, 32);
+    mundo.arco = Math.PI * 2;
+    mundo.anchoM = 2 * Math.PI * r;
+  } else {
+    // Pantalla curva centrada frente al jugador (-Z)
+    mundo.arco = THREE.MathUtils.degToRad(CONFIG.arcoGrados);
+    mundo.inicioArco = Math.PI - mundo.arco / 2;
+    mundo.anchoM = r * mundo.arco;
+    mundo.alto = mundo.anchoM / aspecto;
+    geo = new THREE.CylinderGeometry(r, r, mundo.alto, 96, 1, true,
+                                     mundo.inicioArco, mundo.arco);
+  }
+  mundo.malla = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+    map: mundo.textura, side: THREE.BackSide
+  }));
+  mundo.malla.position.y = alturaOjos;
+  mundo.malla.renderOrder = -1;
+  scene.add(mundo.malla);
+}
+
+function quitarMundo() {
+  if (!mundo.malla) return;
+  scene.remove(mundo.malla);
+  mundo.malla.geometry.dispose();
+  mundo.malla.material.dispose();
+  mundo.malla = null;
+}
+
 /* ---------- Manos y controles ---------- */
 const manos = [renderer.xr.getHand(0), renderer.xr.getHand(1)];
 const agarres = [renderer.xr.getControllerGrip(0), renderer.xr.getControllerGrip(1)];
@@ -196,17 +286,16 @@ const geoRayo = new THREE.BufferGeometry().setFromPoints([
   new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)
 ]);
 const matRayo = new THREE.LineBasicMaterial({ color: 0x00ED64, transparent: true, opacity: 0.6 });
+const rayos = [];
 
 punteros.forEach((p, i) => {
   const rayo = new THREE.Line(geoRayo, matRayo);
   rayo.scale.z = 3;
   rayo.visible = false;
   p.add(rayo);
-  p.addEventListener('connected', (ev) => {
-    fuentes[i] = ev.data;
-    rayo.visible = !ev.data.hand;          // el rayo solo con controles
-  });
-  p.addEventListener('disconnected', () => { fuentes[i] = null; rayo.visible = false; });
+  rayos[i] = rayo;
+  p.addEventListener('connected', (ev) => { fuentes[i] = ev.data; });
+  p.addEventListener('disconnected', () => { fuentes[i] = null; });
   p.addEventListener('select', () => seleccionarConRayo(p, i));
   scene.add(p);
 });
@@ -310,6 +399,8 @@ function mostrarMensaje(titulo, subtitulo, ms) {
 const estado = {
   // fuera | colocando | jugando | revelando | ganado | perdido
   fase: 'fuera',
+  modo: 'mr',              // 'mr' (habitacion real) o '360' (imagen alrededor)
+  pantalla: false,         // true = "Probar en pantalla" (sin lentes, con raton)
   nombre: '',
   encontrados: 0,
   inicio: 0,
@@ -329,7 +420,7 @@ const camDir = new THREE.Vector3();
 const tmp = new THREE.Vector3();
 
 function posicionCamara() {
-  const cam = renderer.xr.getCamera();
+  const cam = estado.pantalla ? camera : renderer.xr.getCamera();
   cam.getWorldPosition(camPos);
   cam.getWorldDirection(camDir);
   return cam;
@@ -429,7 +520,43 @@ function lejosDeLosDemas(pos, elegidos, sep) {
   return elegidos.every((e) => e.pos.distanceTo(pos) >= sep);
 }
 
+/** Modo 360: patos camuflados sobre la imagen, mirando al jugador */
+function colocarPatos360() {
+  limpiarPatos();
+  const r = CONFIG.radio360 - 0.04;           // apenas delante de la imagen
+  const elegidos = [];
+  let intentos = 0;
+
+  while (elegidos.length < CONFIG.totalPatos && intentos < 3000) {
+    intentos++;
+    const anchoPato = mundo.anchoM * aleatorio(CONFIG.tamano360Min, CONFIG.tamano360Max) / 100;
+    const escala = anchoPato / (CONFIG.tamano * ASPECTO_PATO);
+    const altoPato = CONFIG.tamano * escala;
+    const margenAng = (anchoPato / r) * 0.8;
+
+    let ang, y;
+    if (mundo.esfera) {
+      ang = Math.random() * Math.PI * 2;
+      const lat = THREE.MathUtils.degToRad(aleatorio(-30, 25));   // sin polos
+      y = mundo.centroY + Math.sin(lat) * r - altoPato / 2;
+    } else {
+      ang = aleatorio(mundo.inicioArco + margenAng, mundo.inicioArco + mundo.arco - margenAng);
+      const mitad = mundo.alto / 2;
+      y = aleatorio(mundo.centroY - mitad + altoPato * 0.3, mundo.centroY + mitad - altoPato * 1.3);
+    }
+    const radioPlano = mundo.esfera ? Math.cos(Math.asin(
+      Math.max(-1, Math.min(1, (y + altoPato / 2 - mundo.centroY) / r)))) * r : r;
+    const pos = new THREE.Vector3(Math.sin(ang) * radioPlano, y, Math.cos(ang) * radioPlano);
+
+    const sep = intentos < 2000 ? anchoPato * 3 : anchoPato * 1.2;
+    if (elegidos.every((e) => e.pos.distanceTo(pos) >= sep)) elegidos.push({ pos, escala });
+  }
+
+  elegidos.forEach((c) => crearPato(c.pos, false, c.escala, matPato360));
+}
+
 function colocarPatos(frame) {
+  if (estado.modo === '360') { colocarPatos360(); return; }
   limpiarPatos();
   const refSpace = renderer.xr.getReferenceSpace();
   const elegidos = [];
@@ -453,11 +580,13 @@ function colocarPatos(frame) {
   elegidos.forEach((c) => crearPato(c.pos, c.sobreSuperficie));
 }
 
-function crearPato(pos, sobreSuperficie) {
+function crearPato(pos, sobreSuperficie, escala = 1, material = matPato) {
   const grupo = new THREE.Group();
   grupo.position.copy(pos);
+  grupo.scale.setScalar(escala);
 
-  const malla = new THREE.Mesh(geoPato, matPato);
+  const malla = new THREE.Mesh(geoPato, material);
+  if (estado.modo === '360') malla.rotation.z = THREE.MathUtils.degToRad(aleatorio(-22, 22));
   malla.scale.x = Math.random() < 0.5 ? -1 : 1;   // espejo al azar
   grupo.add(malla);
 
@@ -470,8 +599,9 @@ function crearPato(pos, sobreSuperficie) {
   scene.add(grupo);
   patos.push({
     grupo, malla,
-    centro: pos.clone().add(new THREE.Vector3(0, CONFIG.tamano / 2, 0)),
-    flota: !sobreSuperficie,
+    escala,
+    centro: pos.clone().add(new THREE.Vector3(0, CONFIG.tamano * escala / 2, 0)),
+    flota: !sobreSuperficie && estado.modo !== '360',
     fase: Math.random() * Math.PI * 2,
     atrapado: false,
     revelado: false,
@@ -529,9 +659,30 @@ function seleccionarConRayo(puntero, i) {
   matRot.identity().extractRotation(puntero.matrixWorld);
   raycaster.ray.origin.setFromMatrixPosition(puntero.matrixWorld);
   raycaster.ray.direction.set(0, 0, -1).applyMatrix4(matRot);
-  raycaster.far = 6;
+  raycaster.far = CONFIG.radio360 + 2;
+  atraparConRayo(i);
+}
 
+/** Atrapa el pato al que apunta raycaster.ray (mando, mano o raton) */
+function atraparConRayo(i) {
+  if (estado.fase !== 'jugando') return;
   const vivos = patos.filter((p) => !p.atrapado);
+
+  if (estado.modo === '360') {
+    // Punteria generosa: gana el pato mas cercano al rayo dentro de la tolerancia
+    let mejor = null, mejorAng = Infinity;
+    const aPato = new THREE.Vector3();
+    vivos.forEach((p) => {
+      aPato.copy(p.centro).sub(raycaster.ray.origin);
+      const dist = aPato.length();
+      const radioAng = Math.atan((CONFIG.tamano * p.escala / 2) / dist) * CONFIG.toleranciaApuntado;
+      const ang = aPato.angleTo(raycaster.ray.direction);
+      if (ang < radioAng && ang < mejorAng) { mejor = p; mejorAng = ang; }
+    });
+    if (mejor) atrapar(mejor, i);
+    return;
+  }
+
   const choques = raycaster.intersectObjects(vivos.map((p) => p.malla), false);
   if (!choques.length) return;
   const pato = vivos.find((p) => p.malla === choques[0].object);
@@ -589,8 +740,8 @@ function animarConfeti(dt) {
 /* =============================================================
    Partida
    ============================================================= */
-async function entrar() {
-  const boton = $('#btn-entrar');
+async function entrar(modo) {
+  const boton = $(modo === '360' ? '#btn-entrar-360' : '#btn-entrar');
   const aviso = $('#estado-xr');
 
   const nombre = $('#nombre').value.trim().replace(/\s+/g, ' ');
@@ -603,16 +754,24 @@ async function entrar() {
   estado.nombre = nombre.slice(0, 40);
   try { localStorage.setItem(CLAVE_NOMBRE, estado.nombre); } catch (e) {}
 
+  if (modo === '360' && !mundo.textura) {
+    aviso.textContent = 'La imagen 360 todavía se está cargando, espera un momento.';
+    aviso.className = 'estado-xr';
+    return;
+  }
+  estado.modo = modo;
+
   boton.disabled = true;
-  aviso.textContent = 'Abriendo realidad mixta…';
+  aviso.textContent = modo === '360' ? 'Abriendo modo 360…' : 'Abriendo realidad mixta…';
   aviso.className = 'estado-xr';
 
   try {
     sonidos.iniciar();   // el audio se habilita con este clic
-    const sesion = await navigator.xr.requestSession('immersive-ar', {
-      requiredFeatures: ['local-floor'],
-      optionalFeatures: ['hand-tracking', 'plane-detection']
-    });
+    const sesion = await navigator.xr.requestSession(
+      modo === '360' ? 'immersive-vr' : 'immersive-ar', {
+        requiredFeatures: ['local-floor'],
+        optionalFeatures: modo === '360' ? ['hand-tracking'] : ['hand-tracking', 'plane-detection']
+      });
     sesion.addEventListener('end', alSalir);
     await renderer.xr.setSession(sesion);
 
@@ -633,6 +792,7 @@ async function entrar() {
 
 function empezarPartida(frame) {
   estado.partida++;
+  if (estado.modo === '360') construirMundo(camPos.y > 0.5 ? camPos.y : 1.6);
   colocarPatos(frame);
   estado.fase = 'jugando';
   estado.encontrados = 0;
@@ -645,9 +805,14 @@ function empezarPartida(frame) {
   dibujarHud();
   colocarFrente(hud.malla, 0.8, -0.32, true);
   mostrarMensaje('¡Encuentra ' + CONFIG.totalPatos + ' patos!',
-                 'Míralos a tu alrededor y tócalos con la mano', 4500);
+                 estado.pantalla
+                   ? 'Arrastra para mirar y haz clic en los patos'
+                   : estado.modo === '360'
+                     ? 'Gira la cabeza, apunta y haz pinza (o gatillo)'
+                     : 'Míralos a tu alrededor y tócalos con la mano', 4500);
   if (window.EnVivo) {
-    window.EnVivo.iniciar({ nombre: estado.nombre, modo: 'lentes', total: CONFIG.totalPatos });
+    window.EnVivo.iniciar({ nombre: estado.nombre, modo: estado.pantalla ? 'pantalla' : 'lentes',
+                           total: CONFIG.totalPatos });
   }
 }
 
@@ -672,7 +837,7 @@ function terminarPartida() {
 
   // Solo las partidas completas entran al ranking; se guarda solo
   guardarAutomatico().then((posicion) => {
-    if (posicion && estado.fase === 'ganado' && renderer.xr.isPresenting) {
+    if (posicion && estado.fase === 'ganado' && (renderer.xr.isPresenting || estado.pantalla)) {
       mostrarMensaje('¡Los encontraste todos!', 'Tiempo: ' + tiempo + '  ·  Posición #' + posicion, 0);
     }
   });
@@ -692,10 +857,12 @@ function tiempoAgotado() {
   sonidos.aviso();
 
   // El entorno se tine de verde y los patos que faltaban se marcan con un aro
-  velo.visible = true;
+  if (estado.modo === '360' && mundo.malla) mundo.malla.material.color.set(0x7dffb4);
+  else velo.visible = true;
   patos.forEach((p) => {
     if (p.atrapado) return;
     p.revelado = true;
+    p.malla.material = matPato;        // sin camuflaje
     p.aro = new THREE.Mesh(geoAro, matAro);
     p.aro.position.y = CONFIG.tamano / 2;
     p.aro.renderOrder = 5;
@@ -714,8 +881,100 @@ function tiempoAgotado() {
 }
 
 function terminarSesion() {
+  if (estado.pantalla) { salirDePantalla(); return; }
   const s = renderer.xr.getSession();
   if (s) s.end();
+}
+
+/* =============================================================
+   Probar en pantalla (sin lentes): arrastrar para mirar, clic
+   sobre los patos. Sirve para revisar la imagen y el camuflaje.
+   ============================================================= */
+const mirada = { yaw: 0, pitch: 0, arrastre: null };
+
+function leerNombre() {
+  const nombre = $('#nombre').value.trim().replace(/\s+/g, ' ');
+  if (!nombre) {
+    $('#estado-xr').textContent = 'Escribe tu nombre para jugar.';
+    $('#estado-xr').className = 'estado-xr err';
+    $('#nombre').focus();
+    return null;
+  }
+  estado.nombre = nombre.slice(0, 40);
+  try { localStorage.setItem(CLAVE_NOMBRE, estado.nombre); } catch (e) {}
+  return estado.nombre;
+}
+
+function probarEnPantalla() {
+  if (!leerNombre()) return;
+  if (!mundo.textura) {
+    $('#estado-xr').textContent = 'La imagen 360 todavía se está cargando, espera un momento.';
+    return;
+  }
+  sonidos.iniciar();
+  estado.modo = '360';
+  estado.pantalla = true;
+  mirada.yaw = 0;
+  mirada.pitch = 0;
+  camera.position.set(0, 1.6, 0);
+  camera.rotation.set(0, 0, 0, 'YXZ');
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  cerrarModales();
+  contenedor.style.display = 'block';
+  $('#ayuda-pantalla').style.display = 'block';
+  estado.fase = 'colocando';
+  estado.encontrados = 0;
+  estado.transcurrido = 0;
+  estado.inicioSesion = performance.now() - CONFIG.esperaPlanosMs;  // sin esperar planos
+}
+
+function salirDePantalla() {
+  estado.pantalla = false;
+  $('#ayuda-pantalla').style.display = 'none';
+  alSalir();
+}
+
+function prepararMouse() {
+  const lienzo = renderer.domElement;
+  lienzo.style.touchAction = 'none';
+  lienzo.addEventListener('pointerdown', (e) => {
+    if (!estado.pantalla) return;
+    mirada.arrastre = { x: e.clientX, y: e.clientY, movio: 0 };
+    lienzo.setPointerCapture(e.pointerId);
+  });
+  lienzo.addEventListener('pointermove', (e) => {
+    const a = mirada.arrastre;
+    if (!estado.pantalla || !a) return;
+    const dx = e.clientX - a.x, dy = e.clientY - a.y;
+    a.movio += Math.abs(dx) + Math.abs(dy);
+    a.x = e.clientX; a.y = e.clientY;
+    // La imagen sigue al cursor: radianes por pixel segun el campo de vision
+    const k = THREE.MathUtils.degToRad(camera.fov) / window.innerHeight;
+    mirada.yaw += dx * k;
+    mirada.pitch = Math.max(-1.2, Math.min(1.2, mirada.pitch + dy * k));
+    camera.rotation.set(mirada.pitch, mirada.yaw, 0, 'YXZ');
+  });
+  lienzo.addEventListener('pointerup', (e) => {
+    const a = mirada.arrastre;
+    mirada.arrastre = null;
+    if (!estado.pantalla || !a || a.movio > 6) return;   // fue arrastre, no clic
+    const ndc = new THREE.Vector2(
+      (e.clientX / window.innerWidth) * 2 - 1,
+      -(e.clientY / window.innerHeight) * 2 + 1
+    );
+    raycaster.setFromCamera(ndc, camera);
+    atraparConRayo(0);
+  });
+  window.addEventListener('keydown', (e) => {
+    if (estado.pantalla && e.key === 'Escape') {
+      if (window.EnVivo && estado.fase === 'jugando') {
+        window.EnVivo.cerrar('abandonado', { encontrados: estado.encontrados });
+      }
+      salirDePantalla();
+    }
+  });
 }
 
 function alSalir() {
@@ -723,14 +982,15 @@ function alSalir() {
   hud.malla.visible = false;
   mensaje.malla.visible = false;
   velo.visible = false;
+  quitarMundo();
+  rayos.forEach((r) => { r.visible = false; });
   limpiarPatos();
   particulas.forEach((p) => scene.remove(p.m));
   particulas = [];
 
   const fase = estado.fase;
   estado.fase = 'fuera';
-  $('#btn-entrar').disabled = false;
-  $('#btn-entrar').textContent = 'Entrar en realidad mixta';
+  actualizarBotones();
 
   if (fase === 'ganado') {
     $('#titulo-fin').textContent = '¡Los encontraste todos! 🎉';
@@ -764,10 +1024,17 @@ renderer.setAnimationLoop((tiempo, frame) => {
   const dt = Math.min(0.05, (ahora - ultimo) / 1000);
   ultimo = ahora;
 
-  if (!renderer.xr.isPresenting) return;
+  if (!renderer.xr.isPresenting && !estado.pantalla) return;
 
   const cam = posicionCamara();
   sonidos.actualizarOyente(cam);
+
+  // Rayo: siempre en 360 (se apunta de lejos); en MR solo con controles
+  rayos.forEach((r, i) => {
+    const f = fuentes[i];
+    r.visible = !!f && (estado.modo === '360' || !f.hand);
+    r.scale.z = estado.modo === '360' ? CONFIG.radio360 : 3;
+  });
 
   // Esperar un momento a que el Quest entregue los planos de la habitacion
   if (estado.fase === 'colocando') {
@@ -779,7 +1046,7 @@ renderer.setAnimationLoop((tiempo, frame) => {
   if (estado.fase === 'jugando') {
     estado.transcurrido = ahora - estado.inicio;
     if (ahora - estado.ultimoHud > 100) { estado.ultimoHud = ahora; dibujarHud(); }
-    revisarToques();
+    if (estado.modo === 'mr') revisarToques();
 
     if (CONFIG.tiempoLimite > 0 && estado.fase === 'jugando' && tiempoRestante() <= 0) {
       tiempoAgotado();
@@ -804,7 +1071,7 @@ renderer.setAnimationLoop((tiempo, frame) => {
     velo.material.opacity = 0.32 * k;
   }
 
-  if (hud.malla.visible) colocarFrente(hud.malla, 0.8, -0.32, false);
+  if (hud.malla.visible) colocarFrente(hud.malla, 0.8, estado.pantalla ? -0.2 : -0.32, false);
   if (mensaje.malla.visible) colocarFrente(mensaje.malla, 1.1, -0.05, false);
 
   // Animar patos: miran al jugador, se mecen y, al atraparlos, saltan y desaparecen
@@ -827,6 +1094,7 @@ renderer.setAnimationLoop((tiempo, frame) => {
       const s = 1.25 + Math.sin(t * 6) * 0.12;
       p.malla.scale.set(Math.sign(p.malla.scale.x) * s, s, s);
       p.malla.position.y = Math.abs(Math.sin(t * 5 + p.fase)) * 0.06;
+      if (estado.modo === '360') p.malla.position.y *= 0.3;
       if (p.aro) {
         p.aro.position.y = CONFIG.tamano / 2 * s + p.malla.position.y;
         p.aro.scale.setScalar(s * (1 + Math.sin(t * 6) * 0.08));
@@ -936,10 +1204,17 @@ async function inicializar() {
     : 'todo el tiempo que quieras';
   try { $('#nombre').value = localStorage.getItem(CLAVE_NOMBRE) || ''; } catch (e) {}
 
-  $('#btn-entrar').addEventListener('click', entrar);
+  $('#btn-entrar').addEventListener('click', () => entrar('mr'));
+  $('#btn-entrar-360').addEventListener('click', () => entrar('360'));
   $('#nombre').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !$('#btn-entrar').disabled) entrar();
+    if (e.key !== 'Enter') return;
+    if (PAGINA_VR) { if (!$('#btn-entrar-360').disabled) entrar('360'); }
+    else if (!$('#btn-entrar').disabled) entrar('mr');
   });
+  const btnProbar = $('#btn-probar');
+  if (btnProbar) btnProbar.addEventListener('click', probarEnPantalla);
+  prepararMouse();
+  precargar360();
   $('#btn-otra').addEventListener('click', volverAJugar);
   $('#btn-cerrar-ranking').addEventListener('click', volverAJugar);
   $('#btn-ver-ranking').addEventListener('click', () => {
@@ -950,28 +1225,44 @@ async function inicializar() {
 
   window.addEventListener('resize', () => {
     if (renderer.xr.isPresenting) return;
+    if (!estado.pantalla && contenedor.style.display !== 'block') return;
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  const boton = $('#btn-entrar');
-  const aviso = $('#estado-xr');
-  let soportado = false;
-  try {
-    soportado = !!(navigator.xr && await navigator.xr.isSessionSupported('immersive-ar'));
-  } catch (e) { soportado = false; }
+  const soporta = async (tipo) => {
+    try { return !!(navigator.xr && await navigator.xr.isSessionSupported(tipo)); }
+    catch (e) { return false; }
+  };
+  soporte.mr = await soporta('immersive-ar');
+  soporte.vr = await soporta('immersive-vr');
+  actualizarBotones();
 
-  if (soportado) {
-    boton.disabled = false;
-    boton.textContent = 'Entrar en realidad mixta';
-  } else {
-    boton.textContent = 'Realidad mixta no disponible';
+  if (PAGINA_VR ? !soporte.vr : (!soporte.mr && !soporte.vr)) {
+    const aviso = $('#estado-xr');
     aviso.className = 'estado-xr err';
     aviso.textContent = !window.isSecureContext
       ? 'Abre esta página con https:// (WebXR no funciona en http).'
-      : 'Abre esta página en el navegador de tu Meta Quest 3.';
+      : 'Abre esta página en el navegador de tu Meta Quest 3' +
+        (PAGINA_VR ? ', o usa «Probar en pantalla».' : '.');
   }
+}
+
+// vr.php marca <body data-pagina="vr">: solo realidad virtual con la imagen
+const PAGINA_VR = document.body.dataset.pagina === 'vr';
+
+const soporte = { mr: false, vr: false };
+
+function actualizarBotones() {
+  const mr = $('#btn-entrar');
+  const v360 = $('#btn-entrar-360');
+  mr.disabled = !soporte.mr;
+  mr.textContent = soporte.mr ? 'Entrar en realidad mixta' : 'Realidad mixta no disponible';
+  v360.disabled = !soporte.vr;
+  v360.textContent = PAGINA_VR
+    ? (soporte.vr ? 'Entrar con los lentes' : 'Lentes VR no disponibles')
+    : (soporte.vr ? 'Jugar en 360' : '360 no disponible');
 }
 
 inicializar();

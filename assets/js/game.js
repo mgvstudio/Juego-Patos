@@ -862,13 +862,15 @@ function inicializar() {
 }
 
 /**
- * En un visor como el Meta Quest 3 ofrece la version de realidad mixta.
+ * En un visor como el Meta Quest ofrece las versiones VR y de realidad mixta.
  */
 function detectarRealidadMixta() {
   if (!navigator.xr || !navigator.xr.isSessionSupported) return;
-  navigator.xr.isSessionSupported('immersive-ar').then((ok) => {
-    if (ok) $('#caja-mr').style.display = 'block';
-  }).catch(() => {});
+  Promise.all(['immersive-vr', 'immersive-ar'].map((tipo) =>
+    navigator.xr.isSessionSupported(tipo).catch(() => false)
+  )).then((soportes) => {
+    if (soportes.some(Boolean)) $('#caja-mr').style.display = 'flex';
+  });
 }
 
 /**
